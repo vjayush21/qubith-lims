@@ -44,51 +44,50 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email already registered" }, { status: 409 });
     }
 
-    // Create tenant + admin user in a transaction
+    // Create tenant + admin user using raw SQL
     const passwordHash = await hashPassword(data.password);
-    const [tenant] = await db
-      .insert(schema.tenants)
-      .values({
-        name: data.labName,
-        slug: data.labSlug,
-        city: data.city,
-        phone: data.phone,
-        plan: "trial",
-        planExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-      })
-      .returning();
+    const tenantId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = now + 30 * 24 * 60 * 60; // 30 days
 
-    const [user] = await db
-      .insert(schema.users)
-      .values({
-        tenantId: tenant.id,
-        email: data.email,
-        passwordHash,
-        fullName: data.fullName,
-        role: "lab_admin",
-      })
-      .returning();
+    const { getRawDb } = await import("@/db/client");
+    const rawDb = getRawDb();
+
+    rawDb
+      .prepare(
+        `INSERT INTO tenants (id, name, slug, address, city, phone, email, logo_url, nabl_accredited, plan, plan_expires_at, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, NULL, ?, ?, NULL, NULL, 0, 'trial', ?, 1, ?, ?)`
+      )
+      .run(tenantId, data.labName, data.labSlug, data.city, data.phone, expiresAt, now, now);
+
+    rawDb
+      .prepare(
+        `INSERT INTO users (id, tenant_id, email, password_hash, full_name, phone, role, mci_number, is_active, last_login_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, 'lab_admin', NULL, 1, NULL, ?, ?)`
+      )
+      .run(userId, tenantId, data.email, passwordHash, data.fullName, now, now);
 
     // Create session
     const token = await createSessionToken({
-      userId: user.id,
-      tenantId: tenant.id,
-      role: user.role,
-      email: user.email,
+      userId,
+      tenantId,
+      role: "lab_admin",
+      email: data.email,
     });
     await setSessionCookie(token);
 
     await logAudit("signup", {
-      tenantId: tenant.id,
-      userId: user.id,
+      tenantId,
+      userId,
       ipAddress: req.headers.get("x-forwarded-for") || null,
       userAgent: req.headers.get("user-agent") || null,
     });
 
     return NextResponse.json({
       ok: true,
-      tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name },
-      user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role },
+      tenant: { id: tenantId, slug: data.labSlug, name: data.labName },
+      user: { id: userId, email: data.email, fullName: data.fullName, role: "lab_admin" },
     });
   } catch (err) {
     return jsonError(err);

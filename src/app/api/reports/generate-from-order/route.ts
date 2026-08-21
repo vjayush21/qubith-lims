@@ -13,54 +13,40 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       const data = schema2.parse(body);
 
-      // Check if report already exists
-      const [existing] = await db
-        .select()
-        .from(schema.reports)
-        .where(
-          and(
-            eq(schema.reports.orderId, data.orderId),
-            eq(schema.reports.tenantId, session.tenantId)
-          )
-        )
-        .limit(1);
+      // Check if report already exists (raw SQL)
+      const { getRawDb } = await import("@/db/client");
+      const rawDb = getRawDb();
+      const existing = rawDb
+        .prepare(`SELECT id FROM reports WHERE order_id = ? AND tenant_id = ?`)
+        .get(data.orderId, session.tenantId) as { id: string } | undefined;
       if (existing) {
-        return NextResponse.json({ reportId: existing.id });
+        return { reportId: existing.id };
       }
 
-      // Generate report code
-      const [count] = await db
-        .select({ id: schema.reports.id })
-        .from(schema.reports)
-        .where(eq(schema.reports.tenantId, session.tenantId));
+      const reportId = crypto.randomUUID();
       const reportCode = `RPT-${String(Date.now()).slice(-5)}`;
+      const now = Math.floor(Date.now() / 1000);
 
-      const [report] = await db
-        .insert(schema.reports)
-        .values({
-          tenantId: session.tenantId,
-          orderId: data.orderId,
-          reportCode,
-          status: "validated",
-          validatedById: session.userId,
-          validatedAt: new Date(),
-        })
-        .returning();
+      rawDb
+        .prepare(
+          `INSERT INTO reports (id, tenant_id, order_id, report_code, status, pdf_url, validated_by_id, validated_at, delivered_at, created_at)
+           VALUES (?, ?, ?, ?, 'validated', NULL, ?, ?, NULL, ?)`
+        )
+        .run(reportId, session.tenantId, data.orderId, reportCode, session.userId, now, now);
 
       // Update order collection status to completed
-      await db
-        .update(schema.testOrders)
-        .set({ collectionStatus: "completed", updatedAt: new Date() })
-        .where(eq(schema.testOrders.id, data.orderId));
+      rawDb
+        .prepare(`UPDATE test_orders SET collection_status = 'completed', updated_at = ? WHERE id = ?`)
+        .run(now, data.orderId);
 
       await logAudit("create_report", {
         tenantId: session.tenantId,
         userId: session.userId,
-        resource: `report:${report.id}`,
+        resource: `report:${reportId}`,
         metadata: { reportCode, orderId: data.orderId },
       });
 
-      return NextResponse.json({ reportId: report.id });
+      return { reportId };
     });
   } catch (err) {
     return jsonError(err);
