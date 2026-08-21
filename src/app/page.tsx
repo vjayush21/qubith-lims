@@ -429,7 +429,7 @@ export default function Home() {
             <div className="w-5 h-5 rounded bg-[var(--primary-deep)] flex items-center justify-center">
               <span className="text-white font-semibold text-[10px]">Q</span>
             </div>
-            <span>Built by QuBith Labs</span>
+            <span>qubith</span>
           </div>
           <div className="flex items-center gap-5 text-sm text-[var(--text-secondary)]">
             <Link href="/privacy" className="hover:text-[var(--text-primary)]">
