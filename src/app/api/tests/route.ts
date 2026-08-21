@@ -19,29 +19,31 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       const data = createSchema.parse(body);
       const id = crypto.randomUUID();
-      await db
-        .insert(schema.tests)
-        .values({
+      const now = Math.floor(Date.now() / 1000);
+      const { getRawDb } = await import("@/db/client");
+      const rawDb = getRawDb();
+      rawDb
+        .prepare(
+          `INSERT INTO tests (id, tenant_id, code, name, department, sample_type, price_paise, tat_hours, is_active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+           ON CONFLICT (tenant_id, code) DO UPDATE SET
+             name = excluded.name,
+             department = excluded.department,
+             sample_type = excluded.sample_type,
+             price_paise = excluded.price_paise,
+             tat_hours = excluded.tat_hours`
+        )
+        .run(
           id,
-          tenantId: session.tenantId,
-          code: data.code,
-          name: data.name,
-          department: data.department,
-          sampleType: data.sampleType,
-          pricePaise: data.pricePaise,
-          tatHours: data.tatHours,
-          createdAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: [schema.tests.tenantId, schema.tests.code],
-          set: {
-            name: data.name,
-            department: data.department,
-            sampleType: data.sampleType,
-            pricePaise: data.pricePaise,
-            tatHours: data.tatHours,
-          },
-        });
+          session.tenantId,
+          data.code,
+          data.name,
+          data.department ?? null,
+          data.sampleType ?? null,
+          data.pricePaise,
+          data.tatHours,
+          now
+        );
       const [test] = await db
         .select()
         .from(schema.tests)
