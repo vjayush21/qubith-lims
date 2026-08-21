@@ -65,11 +65,23 @@ export async function POST(req: NextRequest) {
           now,
           now
         );
-      const [patient] = await db
-        .select()
-        .from(schema.patients)
-        .where(eq(schema.patients.id, id))
-        .limit(1);
+      // Construct patient from input data (avoid Drizzle SELECT bug)
+      const patient = {
+        id,
+        tenantId: session.tenantId,
+        patientCode: code,
+        fullName: data.fullName,
+        age: data.age ?? null,
+        ageUnit: data.ageUnit || "years",
+        sex: data.sex ?? null,
+        phone: data.phone ?? null,
+        email: data.email ?? null,
+        address: data.address ?? null,
+        refDoctorId: data.refDoctorId ?? null,
+        notes: data.notes ?? null,
+        createdAt: new Date(now * 1000),
+        updatedAt: new Date(now * 1000),
+      };
       await logAudit("create_patient", {
         tenantId: session.tenantId,
         userId: session.userId,

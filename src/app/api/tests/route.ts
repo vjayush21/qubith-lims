@@ -44,11 +44,18 @@ export async function POST(req: NextRequest) {
           data.tatHours,
           now
         );
-      const [test] = await db
-        .select()
-        .from(schema.tests)
-        .where(and(eq(schema.tests.tenantId, session.tenantId), eq(schema.tests.code, data.code)))
-        .limit(1);
+      const test = {
+        id,
+        tenantId: session.tenantId,
+        code: data.code,
+        name: data.name,
+        department: data.department ?? null,
+        sampleType: data.sampleType ?? null,
+        pricePaise: data.pricePaise,
+        tatHours: data.tatHours,
+        isActive: true,
+        createdAt: new Date(now * 1000),
+      };
       return NextResponse.json({ test });
     });
   } catch (err) {
