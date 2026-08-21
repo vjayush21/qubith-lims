@@ -37,11 +37,12 @@ export default function Home() {
             Built for Tier 2/3 India
           </div>
           <h1 className="text-4xl md:text-5xl font-semibold tracking-tight max-w-3xl mx-auto leading-[1.1]">
-            LIMS for the next 50,000 Indian pathology labs.
+            India's pathology labs deserve better software.
           </h1>
           <p className="text-[15px] md:text-base text-[var(--text-secondary)] mt-5 max-w-2xl mx-auto leading-relaxed">
-            Patient booking. Barcode tracking. Branded PDF reports. WhatsApp sharing. GST billing.
-            Built for solo and small labs that are still on Excel and paper.
+            Patient booking, barcode tracking, branded PDF reports, WhatsApp sharing, and GST billing.
+            The LIMS built for the solo and small Indian pathology labs running on Excel and paper.
+            From <span className="text-[var(--text-primary)] font-medium">₹2,500/month</span>.
           </p>
           <div className="flex items-center justify-center gap-3 mt-8">
             <Link

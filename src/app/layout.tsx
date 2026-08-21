@@ -15,9 +15,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "QuBith LIMS — Lab Management for Tier 2/3 Pathology Labs in India",
+  title: "QuBith LIMS — The LIMS Indian pathology labs deserve",
   description:
-    "Patient booking, barcode tracking, branded PDF reports, WhatsApp sharing, GST billing. Built for solo and small pathology labs. DPDP compliant. Data hosted in India.",
+    "Patient booking, barcode tracking, branded PDF reports, WhatsApp sharing, GST billing. The LIMS built for solo and small Indian pathology labs. From ₹2,500/month. DPDP compliant. Data hosted in India.",
   keywords: [
     "LIMS India",
     "pathology lab software",
@@ -25,10 +25,11 @@ export const metadata: Metadata = {
     "tier 2 city labs",
     "pathology software",
     "medical lab software India",
+    "CrelioHealth alternative",
   ],
   openGraph: {
     title: "QuBith LIMS",
-    description: "Modern LIMS for Indian pathology labs. Patient booking, barcode, WhatsApp, GST.",
+    description: "The LIMS Indian pathology labs deserve. Patient booking, barcode, WhatsApp, GST. From ₹2,500/month.",
     type: "website",
   },
 };
