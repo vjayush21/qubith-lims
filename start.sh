@@ -20,17 +20,27 @@ if (fs.existsSync(drizzleDir)) {
     .filter(f => f.endsWith('.sql'))
     .sort();
   for (const f of files) {
-    const sql = fs.readFileSync(path.join(drizzleDir, f), 'utf-8');
+    let sql = fs.readFileSync(path.join(drizzleDir, f), 'utf-8');
     // Skip Postgres-specific migrations
-    if (sql.includes('CREATE POLICY') || sql.includes('current_tenant_id()') || sql.includes('ALTER TABLE') && sql.includes('ENABLE ROW LEVEL SECURITY')) {
+    if (sql.includes('CREATE POLICY') || sql.includes('current_tenant_id()') || sql.includes('ENABLE ROW LEVEL SECURITY')) {
       console.log('[start.sh] Skipping Postgres-specific migration: ' + f);
       continue;
     }
+    // Make CREATE TABLE idempotent
+    sql = sql.replace(/CREATE TABLE \`/g, 'CREATE TABLE IF NOT EXISTS \`');
+    sql = sql.replace(/CREATE UNIQUE INDEX/gi, 'CREATE UNIQUE INDEX IF NOT EXISTS');
+    sql = sql.replace(/CREATE INDEX/gi, 'CREATE INDEX IF NOT EXISTS');
     if (sql.includes('--> statement-breakpoint')) {
       const stmts = sql.split('--> statement-breakpoint').map(s => s.trim()).filter(Boolean);
-      for (const stmt of stmts) db.exec(stmt);
+      for (const stmt of stmts) {
+        try { db.exec(stmt); } catch (e) {
+          if (!/already exists/.test(e.message)) throw e;
+        }
+      }
     } else {
-      db.exec(sql);
+      try { db.exec(sql); } catch (e) {
+        if (!/already exists/.test(e.message)) throw e;
+      }
     }
     console.log('[start.sh] Applied: ' + f);
   }
