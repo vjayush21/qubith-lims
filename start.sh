@@ -17,7 +17,7 @@ db.pragma('foreign_keys = ON');
 const drizzleDir = './drizzle';
 if (fs.existsSync(drizzleDir)) {
   const files = fs.readdirSync(drizzleDir)
-    .filter(f => f.endsWith('.sql'))
+    .filter(f => f.endsWith('.sql') && !f.startsWith('_'))
     .sort();
   for (const f of files) {
     let sql = fs.readFileSync(path.join(drizzleDir, f), 'utf-8');
