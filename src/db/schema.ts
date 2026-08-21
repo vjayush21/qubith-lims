@@ -1,51 +1,18 @@
 import {
-  pgTable,
-  uuid,
+  sqliteTable,
   text,
-  timestamp,
   integer,
-  boolean,
-  jsonb,
+  real,
   index,
   uniqueIndex,
-  pgEnum,
-  bigint,
-} from "drizzle-orm/pg-core";
+} from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 
-// ============= Enums =============
-export const userRoleEnum = pgEnum("user_role", [
-  "lab_admin",
-  "lab_tech",
-  "pathologist",
-  "doctor",
-  "patient",
-  "phlebotomist",
-]);
-
-export const sampleStatusEnum = pgEnum("sample_status", [
-  "registered",
-  "collected",
-  "received",
-  "in_progress",
-  "completed",
-  "validated",
-  "rejected",
-]);
-
-export const reportStatusEnum = pgEnum("report_status", [
-  "draft",
-  "pending_validation",
-  "validated",
-  "critical",
-  "delivered",
-]);
-
 // ============= Tenants (labs) =============
-export const tenants = pgTable(
+export const tenants = sqliteTable(
   "tenants",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     address: text("address"),
@@ -53,12 +20,12 @@ export const tenants = pgTable(
     phone: text("phone"),
     email: text("email"),
     logoUrl: text("logo_url"),
-    nablAccredited: boolean("nabl_accredited").notNull().default(false),
-    plan: text("plan").notNull().default("trial"), // trial | starter | pro | premium
-    planExpiresAt: timestamp("plan_expires_at"),
-    isActive: boolean("is_active").notNull().default(true),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    nablAccredited: integer("nabl_accredited", { mode: "boolean" }).notNull().default(false),
+    plan: text("plan").notNull().default("trial"),
+    planExpiresAt: integer("plan_expires_at", { mode: "timestamp" }),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     slugIdx: uniqueIndex("tenants_slug_idx").on(t.slug),
@@ -66,21 +33,21 @@ export const tenants = pgTable(
 );
 
 // ============= Users (lab staff, doctors, patients, phlebotomists) =============
-export const users = pgTable(
+export const users = sqliteTable(
   "users",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
     email: text("email").notNull(),
     passwordHash: text("password_hash"),
     fullName: text("full_name").notNull(),
     phone: text("phone"),
-    role: userRoleEnum("role").notNull(),
-    mciNumber: text("mci_number"), // for doctors
-    isActive: boolean("is_active").notNull().default(true),
-    lastLoginAt: timestamp("last_login_at"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    role: text("role", { enum: ["lab_admin", "lab_tech", "pathologist", "doctor", "patient", "phlebotomist"] }).notNull(),
+    mciNumber: text("mci_number"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    lastLoginAt: integer("last_login_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     emailIdx: uniqueIndex("users_email_idx").on(t.email),
@@ -89,23 +56,23 @@ export const users = pgTable(
 );
 
 // ============= Patients =============
-export const patients = pgTable(
+export const patients = sqliteTable(
   "patients",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-    patientCode: text("patient_code").notNull(), // internal lab code
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    patientCode: text("patient_code").notNull(),
     fullName: text("full_name").notNull(),
     age: integer("age"),
-    ageUnit: text("age_unit").default("years"), // years | months | days
-    sex: text("sex"), // male | female | other
+    ageUnit: text("age_unit").default("years"),
+    sex: text("sex"),
     phone: text("phone"),
     email: text("email"),
     address: text("address"),
-    refDoctorId: uuid("ref_doctor_id").references(() => users.id),
+    refDoctorId: text("ref_doctor_id").references(() => users.id),
     notes: text("notes"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     tenantCodeIdx: uniqueIndex("patients_tenant_code_idx").on(t.tenantId, t.patientCode),
@@ -113,20 +80,20 @@ export const patients = pgTable(
   })
 );
 
-// ============= Test catalog (master list per lab) =============
-export const tests = pgTable(
+// ============= Test catalog =============
+export const tests = sqliteTable(
   "tests",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
     code: text("code").notNull(),
     name: text("name").notNull(),
-    department: text("department"), // hematology | biochemistry | immuno | etc
-    sampleType: text("sample_type"), // blood | urine | stool
-    pricePaise: bigint("price_paise", { mode: "number" }).notNull(),
+    department: text("department"),
+    sampleType: text("sample_type"),
+    pricePaise: integer("price_paise").notNull(),
     tatHours: integer("tat_hours").default(24),
-    isActive: boolean("is_active").notNull().default(true),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     tenantCodeIdx: uniqueIndex("tests_tenant_code_idx").on(t.tenantId, t.code),
@@ -134,25 +101,25 @@ export const tests = pgTable(
 );
 
 // ============= Test orders =============
-export const testOrders = pgTable(
+export const testOrders = sqliteTable(
   "test_orders",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-    orderCode: text("order_code").notNull(), // e.g. ORD-2026-00001
-    patientId: uuid("patient_id").notNull().references(() => patients.id, { onDelete: "cascade" }),
-    collectionCenter: text("collection_center"), // for multi-centre: which center
-    collectionType: text("collection_type").notNull().default("walk_in"), // walk_in | home
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    orderCode: text("order_code").notNull(),
+    patientId: text("patient_id").notNull().references(() => patients.id, { onDelete: "cascade" }),
+    collectionCenter: text("collection_center"),
+    collectionType: text("collection_type").notNull().default("walk_in"),
     homeAddress: text("home_address"),
-    scheduledAt: timestamp("scheduled_at"),
-    phlebotomistId: uuid("phlebotomist_id").references(() => users.id),
+    scheduledAt: integer("scheduled_at", { mode: "timestamp" }),
+    phlebotomistId: text("phlebotomist_id").references(() => users.id),
     collectionStatus: text("collection_status").notNull().default("pending"),
-    totalAmountPaise: bigint("total_amount_paise", { mode: "number" }).notNull(),
-    paidAmountPaise: bigint("paid_amount_paise", { mode: "number" }).notNull().default(0),
-    paymentStatus: text("payment_status").notNull().default("pending"), // pending | partial | paid
-    orderedById: uuid("ordered_by_id").references(() => users.id),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    totalAmountPaise: integer("total_amount_paise").notNull(),
+    paidAmountPaise: integer("paid_amount_paise").notNull().default(0),
+    paymentStatus: text("payment_status").notNull().default("pending"),
+    orderedById: text("ordered_by_id").references(() => users.id),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     tenantOrderIdx: uniqueIndex("test_orders_tenant_order_idx").on(t.tenantId, t.orderCode),
@@ -160,20 +127,20 @@ export const testOrders = pgTable(
   })
 );
 
-// ============= Order test items (which tests are in an order) =============
-export const orderTests = pgTable(
+// ============= Order test items =============
+export const orderTests = sqliteTable(
   "order_tests",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-    orderId: uuid("order_id").notNull().references(() => testOrders.id, { onDelete: "cascade" }),
-    testId: uuid("test_id").notNull().references(() => tests.id),
-    sampleId: uuid("sample_id"),
-    status: sampleStatusEnum("status").notNull().default("registered"),
-    pricePaise: bigint("price_paise", { mode: "number" }).notNull(),
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    orderId: text("order_id").notNull().references(() => testOrders.id, { onDelete: "cascade" }),
+    testId: text("test_id").notNull().references(() => tests.id),
+    sampleId: text("sample_id"),
+    status: text("status", { enum: ["registered", "collected", "received", "in_progress", "completed", "validated", "rejected"] }).notNull().default("registered"),
+    pricePaise: integer("price_paise").notNull(),
     barcode: text("barcode").notNull(),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     tenantBarcodeIdx: uniqueIndex("order_tests_tenant_barcode_idx").on(t.tenantId, t.barcode),
@@ -181,45 +148,45 @@ export const orderTests = pgTable(
   })
 );
 
-// ============= Results (one row per test result) =============
-export const results = pgTable(
+// ============= Results =============
+export const results = sqliteTable(
   "results",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-    orderTestId: uuid("order_test_id").notNull().references(() => orderTests.id, { onDelete: "cascade" }),
-    value: text("value"), // text for flexibility
-    numericValue: text("numeric_value"), // for numeric results
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    orderTestId: text("order_test_id").notNull().references(() => orderTests.id, { onDelete: "cascade" }),
+    value: text("value"),
+    numericValue: text("numeric_value"),
     unit: text("unit"),
     referenceRange: text("reference_range"),
-    isAbnormal: boolean("is_abnormal").notNull().default(false),
-    isCritical: boolean("is_critical").notNull().default(false),
+    isAbnormal: integer("is_abnormal", { mode: "boolean" }).notNull().default(false),
+    isCritical: integer("is_critical", { mode: "boolean" }).notNull().default(false),
     remarks: text("remarks"),
-    enteredById: uuid("entered_by_id").references(() => users.id),
-    validatedById: uuid("validated_by_id").references(() => users.id),
-    validatedAt: timestamp("validated_at"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    enteredById: text("entered_by_id").references(() => users.id),
+    validatedById: text("validated_by_id").references(() => users.id),
+    validatedAt: integer("validated_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     tenantOrderTestIdx: index("results_tenant_order_test_idx").on(t.tenantId, t.orderTestId),
   })
 );
 
-// ============= Reports (one per order, generated when all results are in) =============
-export const reports = pgTable(
+// ============= Reports =============
+export const reports = sqliteTable(
   "reports",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-    orderId: uuid("order_id").notNull().references(() => testOrders.id, { onDelete: "cascade" }),
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    orderId: text("order_id").notNull().references(() => testOrders.id, { onDelete: "cascade" }),
     reportCode: text("report_code").notNull(),
-    status: reportStatusEnum("status").notNull().default("draft"),
+    status: text("status", { enum: ["draft", "pending_validation", "validated", "critical", "delivered"] }).notNull().default("draft"),
     pdfUrl: text("pdf_url"),
-    validatedById: uuid("validated_by_id").references(() => users.id),
-    validatedAt: timestamp("validated_at"),
-    deliveredAt: timestamp("delivered_at"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
+    validatedById: text("validated_by_id").references(() => users.id),
+    validatedAt: integer("validated_at", { mode: "timestamp" }),
+    deliveredAt: integer("delivered_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     tenantOrderIdx: uniqueIndex("reports_tenant_order_idx").on(t.tenantId, t.orderId),
@@ -227,53 +194,25 @@ export const reports = pgTable(
   })
 );
 
-// ============= Audit log (DPDP compliance) =============
-export const auditLogs = pgTable(
+// ============= Audit log =============
+export const auditLogs = sqliteTable(
   "audit_logs",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").references(() => tenants.id),
-    userId: uuid("user_id").references(() => users.id),
-    action: text("action").notNull(), // e.g. "read_patient", "update_result", "login"
-    resource: text("resource"), // e.g. "patient:abc-123"
-    metadata: jsonb("metadata"),
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").references(() => tenants.id),
+    userId: text("user_id").references(() => users.id),
+    action: text("action").notNull(),
+    resource: text("resource"),
+    metadata: text("metadata"),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     tenantCreatedIdx: index("audit_logs_tenant_created_idx").on(t.tenantId, t.createdAt),
   })
 );
 
-// ============= Relations =============
-export const tenantsRelations = relations(tenants, ({ many }) => ({
-  users: many(users),
-  patients: many(patients),
-  tests: many(tests),
-  testOrders: many(testOrders),
-}));
-
-export const patientsRelations = relations(patients, ({ many, one }) => ({
-  tenant: one(tenants, { fields: [patients.tenantId], references: [tenants.id] }),
-  orders: many(testOrders),
-  refDoctor: one(users, { fields: [patients.refDoctorId], references: [users.id] }),
-}));
-
-export const testOrdersRelations = relations(testOrders, ({ many, one }) => ({
-  patient: one(patients, { fields: [testOrders.patientId], references: [patients.id] }),
-  tenant: one(tenants, { fields: [testOrders.tenantId], references: [tenants.id] }),
-  orderTests: many(orderTests),
-  report: one(reports, { fields: [testOrders.id], references: [reports.orderId] }),
-}));
-
-export const orderTestsRelations = relations(orderTests, ({ one }) => ({
-  order: one(testOrders, { fields: [orderTests.orderId], references: [testOrders.id] }),
-  test: one(tests, { fields: [orderTests.testId], references: [tests.id] }),
-  result: one(results, { fields: [orderTests.id], references: [results.orderTestId] }),
-}));
-
-// ============= Types =============
 export type Tenant = typeof tenants.$inferSelect;
 export type NewTenant = typeof tenants.$inferInsert;
 export type User = typeof users.$inferSelect;
