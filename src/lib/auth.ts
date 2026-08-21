@@ -103,13 +103,24 @@ export async function logAudit(
     userAgent?: string | null;
   } = {}
 ) {
-  await db.insert(schema.auditLogs).values({
-    tenantId: opts.tenantId ?? null,
-    userId: opts.userId ?? null,
-    action,
-    resource: opts.resource ?? null,
-    metadata: opts.metadata as any,
-    ipAddress: opts.ipAddress ?? null,
-    userAgent: opts.userAgent ?? null,
-  });
+  // Use raw SQL to bypass Drizzle's parameter binding issues
+  const { getRawDb } = await import("@/db/client");
+  const rawDb = getRawDb();
+  const now = Math.floor(Date.now() / 1000);
+  rawDb
+    .prepare(
+      `INSERT INTO audit_logs (id, tenant_id, user_id, action, resource, metadata, ip_address, user_agent, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      crypto.randomUUID(),
+      opts.tenantId ?? null,
+      opts.userId ?? null,
+      action,
+      opts.resource ?? null,
+      opts.metadata ? JSON.stringify(opts.metadata) : null,
+      opts.ipAddress ?? null,
+      opts.userAgent ?? null,
+      now
+    );
 }
