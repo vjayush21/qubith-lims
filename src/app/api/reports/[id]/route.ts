@@ -11,64 +11,50 @@ export async function GET(
   try {
     return await withTenant(req, async (session) => {
       const { id } = await params;
+      const { getRawDb } = await import("@/db/client");
+      const rawDb = getRawDb();
 
-      const [report] = await db
-        .select()
-        .from(schema.reports)
-        .where(
-          and(
-            eq(schema.reports.id, id),
-            eq(schema.reports.tenantId, session.tenantId)
-          )
-        )
-        .limit(1);
+      const report = rawDb
+        .prepare(`SELECT * FROM reports WHERE id = ? AND tenant_id = ?`)
+        .get(id, session.tenantId) as any;
       if (!report) {
-        return NextResponse.json({ error: "Report not found" }, { status: 404 });
+        return { error: "Report not found" } as any;
       }
 
-      const [order] = await db
-        .select()
-        .from(schema.testOrders)
-        .where(eq(schema.testOrders.id, report.orderId))
-        .limit(1);
+      const order = rawDb
+        .prepare(`SELECT * FROM test_orders WHERE id = ?`)
+        .get(report.order_id) as any;
       if (!order) {
-        return NextResponse.json({ error: "Order not found" }, { status: 404 });
+        return { error: "Order not found" } as any;
       }
 
-      const [patient] = await db
-        .select()
-        .from(schema.patients)
-        .where(eq(schema.patients.id, order.patientId))
-        .limit(1);
+      const patient = rawDb
+        .prepare(`SELECT * FROM patients WHERE id = ?`)
+        .get(order.patient_id) as any;
 
-      const [tenant] = await db
-        .select()
-        .from(schema.tenants)
-        .where(eq(schema.tenants.id, session.tenantId))
-        .limit(1);
+      const tenant = rawDb
+        .prepare(`SELECT * FROM tenants WHERE id = ?`)
+        .get(session.tenantId) as any;
 
-      const orderTests = await db
-        .select({
-          id: schema.orderTests.id,
-          testName: schema.tests.name,
-          department: schema.tests.department,
-          barcode: schema.orderTests.barcode,
-        })
-        .from(schema.orderTests)
-        .innerJoin(schema.tests, eq(schema.tests.id, schema.orderTests.testId))
-        .where(eq(schema.orderTests.orderId, order.id));
+      const orderTests = rawDb
+        .prepare(
+          `SELECT ot.id, ot.barcode, t.name as testName, t.department
+           FROM order_tests ot
+           INNER JOIN tests t ON t.id = ot.test_id
+           WHERE ot.order_id = ?`
+        )
+        .all(order.id) as any[];
 
-      const results = await db
-        .select()
-        .from(schema.results)
-        .where(eq(schema.results.tenantId, session.tenantId));
+      const allResults = rawDb
+        .prepare(`SELECT * FROM results WHERE tenant_id = ?`)
+        .all(session.tenantId) as any[];
 
-      const resultsByOrderTest = new Map<string, typeof results>();
-      for (const r of results) {
-        if (!resultsByOrderTest.has(r.orderTestId)) {
-          resultsByOrderTest.set(r.orderTestId, []);
+      const resultsByOrderTest = new Map<string, any[]>();
+      for (const r of allResults) {
+        if (!resultsByOrderTest.has(r.order_test_id)) {
+          resultsByOrderTest.set(r.order_test_id, []);
         }
-        resultsByOrderTest.get(r.orderTestId)!.push(r);
+        resultsByOrderTest.get(r.order_test_id)!.push(r);
       }
 
       const tests = orderTests.map((ot) => ({
@@ -77,55 +63,69 @@ export async function GET(
         results: resultsByOrderTest.get(ot.id) || [],
       }));
 
-      // Generate report HTML (in-memory for v1; Puppeteer PDF in v1.1)
-      const html = generateReportHTML({
-        tenant: tenant!,
-        patient: patient!,
-        order,
-        report,
-        tests,
-      });
+      // Build the printable HTML
+      const html = buildReportHTML({ tenant, patient, order, report, tests });
 
-      // For v1, we return the HTML inline and a printable URL.
-      // PDF generation with Puppeteer is planned for v1.1.
-      const pdfUrl = `/api/reports/${report.id}/view`;
-
-      await logAudit("generate_report", {
+      await logAudit("read_report", {
         tenantId: session.tenantId,
         userId: session.userId,
         resource: `report:${report.id}`,
       });
 
-      return NextResponse.json({
-        report,
+      // For v1 we return the report data + a wa.me link for WhatsApp sharing.
+      // The actual HTML can be served by the lab's browser via the web app at /orders/[id]/report.
+      const patientPhone = (patient?.phone || "").replace(/\D/g, "");
+      const whatsappShareUrl = patientPhone
+        ? `https://wa.me/${patientPhone}?text=${encodeURIComponent(`Hi ${patient.fullName}, your ${report.report_code} report from ${tenant.name} is ready. View it here: ${process.env.NEXT_PUBLIC_APP_URL || "https://lims.qubith.in"}/orders/${order.id}/report`)}`
+        : `https://wa.me/?text=${encodeURIComponent(`Report ${report.report_code} from ${tenant.name}`)}`;
+
+      return {
+        report: {
+          id: report.id,
+          tenantId: report.tenant_id,
+          orderId: report.order_id,
+          reportCode: report.report_code,
+          status: report.status,
+          pdfUrl: `/api/reports/${report.id}/view`,
+          validatedById: report.validated_by_id,
+          validatedAt: report.validated_at ? new Date(report.validated_at * 1000) : null,
+          deliveredAt: report.delivered_at ? new Date(report.delivered_at * 1000) : null,
+          createdAt: new Date(report.created_at * 1000),
+        },
         patient,
         order,
         tests,
-        pdfUrl,
-        whatsappShareUrl: generateWhatsAppShareUrl(patient?.phone || "", report.reportCode),
-      });
+        pdfUrl: `/api/reports/${report.id}/view`,
+        html, // Include HTML for in-app preview; web app renders it
+        whatsappShareUrl,
+      };
     });
   } catch (err) {
     return jsonError(err);
   }
 }
 
-function generateReportHTML({
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function buildReportHTML({
   tenant,
   patient,
   order,
   report,
   tests,
 }: {
-  tenant: typeof schema.tenants.$inferSelect;
-  patient: typeof schema.patients.$inferSelect;
-  order: typeof schema.testOrders.$inferSelect;
-  report: typeof schema.reports.$inferSelect;
-  tests: Array<{
-    name: string;
-    department: string | null;
-    results: Array<typeof schema.results.$inferSelect>;
-  }>;
+  tenant: any;
+  patient: any;
+  order: any;
+  report: any;
+  tests: Array<{ name: string; department: string | null; results: any[] }>;
 }): string {
   const resultRows = tests
     .flatMap((t) =>
@@ -133,10 +133,10 @@ function generateReportHTML({
         (r) => `
         <tr>
           <td style="padding: 8px 12px; border-bottom: 1px solid #e7e5e4;">${escapeHtml(t.name)}</td>
-          <td style="padding: 8px 12px; border-bottom: 1px solid #e7e5e4; text-align: center; font-weight: 500;">${escapeHtml(r.value || r.numericValue || "—")} ${escapeHtml(r.unit || "")}</td>
-          <td style="padding: 8px 12px; border-bottom: 1px solid #e7e5e4; text-align: center; color: #78716c;">${escapeHtml(r.referenceRange || "—")}</td>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e7e5e4; text-align: center; font-weight: 500;">${escapeHtml(r.value || r.numeric_value || "—")} ${escapeHtml(r.unit || "")}</td>
+          <td style="padding: 8px 12px; border-bottom: 1px solid #e7e5e4; text-align: center; color: #78716c;">${escapeHtml(r.reference_range || "—")}</td>
           <td style="padding: 8px 12px; border-bottom: 1px solid #e7e5e4; text-align: center;">
-            ${r.isCritical ? '<span style="background: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500;">CRITICAL</span>' : r.isAbnormal ? '<span style="background: #fef3c7; color: #d97706; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500;">ABNORMAL</span>' : '<span style="color: #059669; font-size: 12px;">Normal</span>'}
+            ${r.is_critical ? '<span style="background: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500;">CRITICAL</span>' : r.is_abnormal ? '<span style="background: #fef3c7; color: #d97706; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500;">ABNORMAL</span>' : '<span style="color: #059669; font-size: 12px;">Normal</span>'}
           </td>
         </tr>`
       )
@@ -147,7 +147,7 @@ function generateReportHTML({
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Report ${report.reportCode}</title>
+  <title>Report ${report.report_code}</title>
   <style>
     @page { size: A4; margin: 20mm; }
     body { font-family: 'Helvetica', 'Arial', sans-serif; color: #1c1917; font-size: 12px; line-height: 1.5; }
@@ -177,18 +177,18 @@ function generateReportHTML({
     </div>
     <div class="report-meta">
       <h2>PATHOLOGY REPORT</h2>
-      <p><strong>Report #:</strong> ${report.reportCode}</p>
-      <p><strong>Date:</strong> ${new Date(report.createdAt).toLocaleDateString("en-IN")}</p>
+      <p><strong>Report #:</strong> ${report.report_code}</p>
+      <p><strong>Date:</strong> ${new Date(report.created_at * 1000).toLocaleDateString("en-IN")}</p>
     </div>
   </div>
 
   <div class="patient-info">
-    <div><strong>Patient:</strong> ${escapeHtml(patient.fullName)}</div>
-    <div><strong>Patient ID:</strong> ${patient.patientCode}</div>
-    <div><strong>Age/Sex:</strong> ${patient.age || "—"} ${patient.ageUnit || ""} / ${patient.sex || "—"}</div>
+    <div><strong>Patient:</strong> ${escapeHtml(patient.full_name)}</div>
+    <div><strong>Patient ID:</strong> ${patient.patient_code}</div>
+    <div><strong>Age/Sex:</strong> ${patient.age || "—"} ${patient.age_unit || ""} / ${patient.sex || "—"}</div>
     <div><strong>Phone:</strong> ${escapeHtml(patient.phone || "—")}</div>
     <div><strong>Ref. By:</strong> Dr. Self</div>
-    <div><strong>Order #:</strong> ${order.orderCode}</div>
+    <div><strong>Order #:</strong> ${order.order_code}</div>
   </div>
 
   <table>
@@ -217,21 +217,4 @@ function generateReportHTML({
   </div>
 </body>
 </html>`;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function generateWhatsAppShareUrl(phone: string, reportCode: string): string {
-  const message = encodeURIComponent(
-    `Your ${reportCode} report from QuBith LIMS is ready. View it here: ${process.env.NEXT_PUBLIC_APP_URL || "https://lims.qubith.in"}`
-  );
-  // wa.me link with pre-filled message
-  return `https://wa.me/${phone.replace(/[^0-9]/g, "")}?text=${message}`;
 }
