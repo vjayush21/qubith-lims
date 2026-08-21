@@ -102,34 +102,27 @@ export async function GET(req: NextRequest) {
       const q = url.searchParams.get("q");
       const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 200);
 
-      let query = db
-        .select()
-        .from(schema.patients)
-        .where(eq(schema.patients.tenantId, session.tenantId))
-        .orderBy(desc(schema.patients.createdAt))
-        .limit(limit);
+      const { getRawDb } = await import("@/db/client");
+      const rawDb = getRawDb();
 
+      let patients: any[];
       if (q) {
         const like = `%${q}%`;
-        query = db
-          .select()
-          .from(schema.patients)
-          .where(
-            and(
-              eq(schema.patients.tenantId, session.tenantId),
-              or(
-                ilike(schema.patients.fullName, like),
-                ilike(schema.patients.phone, like),
-                ilike(schema.patients.patientCode, like)
-              )
-            )
+        patients = rawDb
+          .prepare(
+            `SELECT * FROM patients
+             WHERE tenant_id = ? AND (full_name LIKE ? OR phone LIKE ? OR patient_code LIKE ?)
+             ORDER BY created_at DESC LIMIT ?`
           )
-          .orderBy(desc(schema.patients.createdAt))
-          .limit(limit);
+          .all(session.tenantId, like, like, like, limit);
+      } else {
+        patients = rawDb
+          .prepare(
+            `SELECT * FROM patients WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?`
+          )
+          .all(session.tenantId, limit);
       }
-
-      const patients = await query;
-      return NextResponse.json({ patients });
+      return { patients };
     });
   } catch (err) {
     return jsonError(err);

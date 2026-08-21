@@ -43,87 +43,94 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       const data = createSchema.parse(body);
 
+      const { getRawDb } = await import("@/db/client");
+      const rawDb = getRawDb();
+
       // Verify patient belongs to tenant
-      const [patient] = await db
-        .select()
-        .from(schema.patients)
-        .where(
-          and(
-            eq(schema.patients.id, data.patientId),
-            eq(schema.patients.tenantId, session.tenantId)
-          )
-        )
-        .limit(1);
+      const patient = rawDb
+        .prepare(`SELECT * FROM patients WHERE id = ? AND tenant_id = ?`)
+        .get(data.patientId, session.tenantId) as any;
       if (!patient) {
-        return NextResponse.json({ error: "Patient not found" }, { status: 404 });
+        return { error: "Patient not found" } as any;
       }
 
       // Verify tests belong to tenant
-      const tests = await db
-        .select()
-        .from(schema.tests)
-        .where(
-          and(
-            eq(schema.tests.tenantId, session.tenantId),
-            eq(schema.tests.isActive, true)
-          )
-        );
+      const tests = rawDb
+        .prepare(
+          `SELECT * FROM tests WHERE tenant_id = ? AND is_active = 1`
+        )
+        .all(session.tenantId) as any[];
       const validTestIds = new Set(tests.map((t) => t.id));
       const testMap = new Map(tests.map((t) => [t.id, t]));
-      const invalid = data.testIds.filter((id) => !validTestIds.has(id));
+      const invalid = data.testIds.filter((id: string) => !validTestIds.has(id));
       if (invalid.length > 0) {
-        return NextResponse.json(
-          { error: "Some tests not found in this lab", invalid },
-          { status: 400 }
-        );
+        return { error: "Some tests not found in this lab", invalid } as any;
       }
 
       // Calculate total
-      const totalPaise = data.testIds.reduce((sum, id) => {
-        return sum + (testMap.get(id)?.pricePaise || 0);
+      const totalPaise = data.testIds.reduce((sum: number, id: string) => {
+        return sum + (testMap.get(id)?.price_paise || 0);
       }, 0);
 
       const orderCode = await nextOrderCode(session.tenantId);
+      const orderId = crypto.randomUUID();
+      const now = Math.floor(Date.now() / 1000);
 
       // Create order
-      const [order] = await db
-        .insert(schema.testOrders)
-        .values({
-          tenantId: session.tenantId,
+      rawDb
+        .prepare(
+          `INSERT INTO test_orders (id, tenant_id, order_code, patient_id, collection_type, collection_center, home_address, scheduled_at, phlebotomist_id, collection_status, total_amount_paise, paid_amount_paise, payment_status, ordered_by_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          orderId,
+          session.tenantId,
           orderCode,
-          patientId: data.patientId,
-          collectionType: data.collectionType,
-          collectionCenter: data.collectionCenter,
-          homeAddress: data.homeAddress,
-          scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
-          phlebotomistId: data.phlebotomistId,
-          totalAmountPaise: totalPaise,
-          paidAmountPaise: data.paidAmountPaise,
-          paymentStatus: data.paymentStatus,
-          orderedById: session.userId,
-          collectionStatus: data.collectionType === "walk_in" ? "pending" : "scheduled",
-        })
-        .returning();
+          data.patientId,
+          data.collectionType,
+          data.collectionCenter ?? null,
+          data.homeAddress ?? null,
+          data.scheduledAt ? Math.floor(new Date(data.scheduledAt).getTime() / 1000) : null,
+          data.phlebotomistId ?? null,
+          data.collectionType === "walk_in" ? "pending" : "scheduled",
+          totalPaise,
+          data.paidAmountPaise,
+          data.paymentStatus,
+          session.userId,
+          now,
+          now
+        );
 
       // Create order_tests
-      const orderTests = data.testIds.map((testId) => ({
-        tenantId: session.tenantId,
-        orderId: order.id,
-        testId,
-        status: "registered" as const,
-        pricePaise: testMap.get(testId)!.pricePaise,
-        barcode: nextBarcode(),
-      }));
+      const createdOrderTests: any[] = [];
+      for (const testId of data.testIds) {
+        const otId = crypto.randomUUID();
+        const barcode = nextBarcode();
+        rawDb
+          .prepare(
+            `INSERT INTO order_tests (id, tenant_id, order_id, test_id, status, price_paise, barcode, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'registered', ?, ?, ?, ?)`
+          )
+          .run(otId, session.tenantId, orderId, testId, testMap.get(testId)!.price_paise, barcode, now, now);
+        createdOrderTests.push({ id: otId, testId, status: "registered", pricePaise: testMap.get(testId)!.price_paise, barcode });
+      }
 
-      const createdOrderTests = await db
-        .insert(schema.orderTests)
-        .values(orderTests)
-        .returning();
+      const order = {
+        id: orderId,
+        tenantId: session.tenantId,
+        orderCode,
+        patientId: data.patientId,
+        totalAmountPaise: totalPaise,
+        paidAmountPaise: data.paidAmountPaise,
+        paymentStatus: data.paymentStatus,
+        collectionStatus: data.collectionType === "walk_in" ? "pending" : "scheduled",
+        createdAt: new Date(now * 1000),
+      };
 
       await logAudit("create_order", {
         tenantId: session.tenantId,
         userId: session.userId,
-        resource: `order:${order.id}`,
+        resource: `order:${orderId}`,
         metadata: {
           orderCode,
           testCount: data.testIds.length,
@@ -131,7 +138,7 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return NextResponse.json({ order, orderTests: createdOrderTests });
+      return { order, orderTests: createdOrderTests };
     });
   } catch (err) {
     return jsonError(err);
@@ -144,27 +151,21 @@ export async function GET(req: NextRequest) {
       const url = new URL(req.url);
       const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 200);
 
-      const orders = await db
-        .select({
-          id: schema.testOrders.id,
-          orderCode: schema.testOrders.orderCode,
-          patientId: schema.testOrders.patientId,
-          patientName: schema.patients.fullName,
-          patientCode: schema.patients.patientCode,
-          totalAmountPaise: schema.testOrders.totalAmountPaise,
-          paidAmountPaise: schema.testOrders.paidAmountPaise,
-          paymentStatus: schema.testOrders.paymentStatus,
-          collectionType: schema.testOrders.collectionType,
-          collectionStatus: schema.testOrders.collectionStatus,
-          createdAt: schema.testOrders.createdAt,
-        })
-        .from(schema.testOrders)
-        .innerJoin(schema.patients, eq(schema.patients.id, schema.testOrders.patientId))
-        .where(eq(schema.testOrders.tenantId, session.tenantId))
-        .orderBy(desc(schema.testOrders.createdAt))
-        .limit(limit);
-
-      return NextResponse.json({ orders });
+      const { getRawDb } = await import("@/db/client");
+      const rawDb = getRawDb();
+      const orders = rawDb
+        .prepare(
+          `SELECT o.id, o.order_code as orderCode, o.patient_id as patientId, p.full_name as patientName, p.patient_code as patientCode,
+                  o.total_amount_paise as totalAmountPaise, o.paid_amount_paise as paidAmountPaise, o.payment_status as paymentStatus,
+                  o.collection_type as collectionType, o.collection_status as collectionStatus, o.created_at as createdAt
+           FROM test_orders o
+           INNER JOIN patients p ON p.id = o.patient_id
+           WHERE o.tenant_id = ?
+           ORDER BY o.created_at DESC
+           LIMIT ?`
+        )
+        .all(session.tenantId, limit);
+      return { orders };
     });
   } catch (err) {
     return jsonError(err);

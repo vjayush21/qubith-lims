@@ -66,17 +66,14 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     return await withTenant(req, async (session) => {
-      const tests = await db
-        .select()
-        .from(schema.tests)
-        .where(
-          and(
-            eq(schema.tests.tenantId, session.tenantId),
-            eq(schema.tests.isActive, true)
-          )
+      const { getRawDb } = await import("@/db/client");
+      const rawDb = getRawDb();
+      const tests = rawDb
+        .prepare(
+          `SELECT * FROM tests WHERE tenant_id = ? AND is_active = 1 ORDER BY name`
         )
-        .orderBy(schema.tests.name);
-      return NextResponse.json({ tests });
+        .all(session.tenantId);
+      return { tests };
     });
   } catch (err) {
     return jsonError(err);
