@@ -1,0 +1,43 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lims-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://lims:${POSTGRES_PASSWORD}@db:5432/lims_main
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - lims-net
+
+  db:
+    image: postgres:16-alpine
+    container_name: lims-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lims
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: lims_main
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lims -d lims_main"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lims-net
+
+networks:
+  lims-net:
+    driver: bridge
+
+volumes:
+  pgdata:
