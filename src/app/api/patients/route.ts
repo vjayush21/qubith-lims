@@ -39,22 +39,28 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       const data = createSchema.parse(body);
       const code = await nextPatientCode(session.tenantId);
+      const id = crypto.randomUUID();
+      await db.insert(schema.patients).values({
+        id,
+        tenantId: session.tenantId,
+        patientCode: code,
+        fullName: data.fullName,
+        age: data.age,
+        ageUnit: data.ageUnit || "years",
+        sex: data.sex,
+        phone: data.phone,
+        email: data.email,
+        address: data.address,
+        refDoctorId: data.refDoctorId,
+        notes: data.notes,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
       const [patient] = await db
-        .insert(schema.patients)
-        .values({
-          tenantId: session.tenantId,
-          patientCode: code,
-          fullName: data.fullName,
-          age: data.age,
-          ageUnit: data.ageUnit || "years",
-          sex: data.sex,
-          phone: data.phone,
-          email: data.email,
-          address: data.address,
-          refDoctorId: data.refDoctorId,
-          notes: data.notes,
-        })
-        .returning();
+        .select()
+        .from(schema.patients)
+        .where(eq(schema.patients.id, id))
+        .limit(1);
       await logAudit("create_patient", {
         tenantId: session.tenantId,
         userId: session.userId,

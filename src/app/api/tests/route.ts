@@ -18,9 +18,11 @@ export async function POST(req: NextRequest) {
     return await withTenant(req, async (session) => {
       const body = await req.json();
       const data = createSchema.parse(body);
-      const [test] = await db
+      const id = crypto.randomUUID();
+      await db
         .insert(schema.tests)
         .values({
+          id,
           tenantId: session.tenantId,
           code: data.code,
           name: data.name,
@@ -28,6 +30,7 @@ export async function POST(req: NextRequest) {
           sampleType: data.sampleType,
           pricePaise: data.pricePaise,
           tatHours: data.tatHours,
+          createdAt: new Date(),
         })
         .onConflictDoUpdate({
           target: [schema.tests.tenantId, schema.tests.code],
@@ -38,8 +41,12 @@ export async function POST(req: NextRequest) {
             pricePaise: data.pricePaise,
             tatHours: data.tatHours,
           },
-        })
-        .returning();
+        });
+      const [test] = await db
+        .select()
+        .from(schema.tests)
+        .where(and(eq(schema.tests.tenantId, session.tenantId), eq(schema.tests.code, data.code)))
+        .limit(1);
       return NextResponse.json({ test });
     });
   } catch (err) {
