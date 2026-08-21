@@ -32,10 +32,6 @@ export default function Home() {
       <main className="flex-1">
         {/* Hero */}
         <section className="max-w-6xl mx-auto px-6 pt-20 pb-16 text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--primary-soft)] text-[var(--primary-deep)] text-xs font-medium mb-6">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary-deep)]" />
-            Built for Tier 2/3 India
-          </div>
           <h1 className="text-4xl md:text-5xl font-semibold tracking-tight max-w-3xl mx-auto leading-[1.1]">
             India's pathology labs deserve better software.
           </h1>
