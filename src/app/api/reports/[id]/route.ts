@@ -3,9 +3,6 @@ import { db, schema } from "@/db/client";
 import { withTenant, jsonError } from "@/lib/api-helpers";
 import { eq, and } from "drizzle-orm";
 import { logAudit } from "@/lib/auth";
-import { join } from "path";
-import { writeFile, mkdir } from "fs/promises";
-import { existsSync } from "fs";
 
 export async function GET(
   req: NextRequest,
@@ -80,13 +77,7 @@ export async function GET(
         results: resultsByOrderTest.get(ot.id) || [],
       }));
 
-      // Generate PDF
-      const dir = join(process.cwd(), "storage", "reports", session.tenantId);
-      if (!existsSync(dir)) {
-        await mkdir(dir, { recursive: true });
-      }
-      const filePath = join(dir, `${report.id}.html`);
-
+      // Generate report HTML (in-memory for v1; Puppeteer PDF in v1.1)
       const html = generateReportHTML({
         tenant: tenant!,
         patient: patient!,
@@ -95,10 +86,8 @@ export async function GET(
         tests,
       });
 
-      await writeFile(filePath, html, "utf-8");
-
-      // Generate actual PDF (simplified for v1 - just HTML)
-      // TODO: integrate Puppeteer for actual PDF generation
+      // For v1, we return the HTML inline and a printable URL.
+      // PDF generation with Puppeteer is planned for v1.1.
       const pdfUrl = `/api/reports/${report.id}/view`;
 
       await logAudit("generate_report", {
