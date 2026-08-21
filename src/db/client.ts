@@ -39,4 +39,4 @@ export const db = new Proxy({} as ReturnType<typeof getDb>, {
   },
 });
 
-export { schema, getDb };
+export { schema, getDb, getRawDb };
