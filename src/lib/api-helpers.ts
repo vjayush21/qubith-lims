@@ -35,6 +35,10 @@ export async function withAuth<T>(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const result = await handler(session);
+    // If the handler returned a NextResponse (e.g. for binary content like PDF), pass it through
+    if (result instanceof NextResponse) {
+      return result;
+    }
     return NextResponse.json(result);
   } catch (err) {
     return jsonError(err);
