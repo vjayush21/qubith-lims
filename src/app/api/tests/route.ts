@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
         isActive: true,
         createdAt: new Date(now * 1000),
       };
-      return NextResponse.json({ test });
+      return { test };
     });
   } catch (err) {
     return jsonError(err);

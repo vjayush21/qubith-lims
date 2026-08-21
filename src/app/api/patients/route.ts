@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
         resource: `patient:${patient.id}`,
         metadata: { patientCode: patient.patientCode },
       });
-      return NextResponse.json({ patient });
+      return { patient };
     });
   } catch (err) {
     return jsonError(err);
