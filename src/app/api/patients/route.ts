@@ -18,16 +18,16 @@ const createSchema = z.object({
 });
 
 async function nextPatientCode(tenantId: string): Promise<string> {
-  // Get the last patient code for this tenant
-  const [last] = await db
-    .select({ code: schema.patients.patientCode })
-    .from(schema.patients)
-    .where(eq(schema.patients.tenantId, tenantId))
-    .orderBy(desc(schema.patients.createdAt))
-    .limit(1);
+  const { getRawDb } = await import("@/db/client");
+  const rawDb = getRawDb();
+  const row = rawDb
+    .prepare(
+      `SELECT patient_code FROM patients WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(tenantId) as { patient_code?: string } | undefined;
   let n = 1;
-  if (last?.code) {
-    const match = last.code.match(/P-(\d+)/);
+  if (row?.patient_code) {
+    const match = row.patient_code.match(/P-(\d+)/);
     if (match) n = parseInt(match[1], 10) + 1;
   }
   return `P-${String(n).padStart(5, "0")}`;
